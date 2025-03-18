@@ -23,6 +23,7 @@ import { type ScraperScrapingResult } from './interface';
 const LOGIN_URL = 'https://www.cal-online.co.il/';
 const TRANSACTIONS_REQUEST_ENDPOINT = 'https://api.cal-online.co.il/Transactions/api/transactionsDetails/getCardTransactionsDetails';
 const PENDING_TRANSACTIONS_REQUEST_ENDPOINT = 'https://api.cal-online.co.il/Transactions/api/approvals/getClearanceRequests';
+const CARD_FRAMEWORK_REQUEST_ENDPOINT = 'https://api.cal-online.co.il/Frames/api/Frames/GetFrameStatus';
 
 const InvalidPasswordMessage = 'שם המשתמש או הסיסמה שהוזנו שגויים';
 
@@ -180,6 +181,84 @@ interface CardPendingTransactionDetails extends CardTransactionDetailsError {
   statusDescription: string;
   statusTitle: string;
 }
+
+export interface FrameStatusResult {
+  result: {
+    bankIssuedCards: BankIssuedCards;
+  };
+}
+
+export interface BankIssuedCards {
+  fictiveMaxAccAmt: number;
+  frameLimitForCardAmount: number;
+  totalUsageAmountForAccountManagementLevel: number;
+  usageAmountForExternalCards: number;
+  nextTotalDebitDateForAccount: string;
+  nextTotalDebitForAccount: number;
+  currencyCode: number;
+  currencySymbol: string;
+  summary: Summary;
+  accountComments: AccountComment[];
+  accountLevelFrames: AccountLevelFrame[];
+  cardLevelFrames: any[];
+  accountExceptionalCards: AccountExceptionalCard[];
+}
+
+export interface Summary {
+  accountFrameType: number;
+  comments: Comment[];
+}
+
+export interface Comment {
+  type: number;
+  key: number;
+  value: string;
+}
+
+export interface AccountComment {
+  type: number;
+  key: number;
+  value: string;
+}
+
+export interface AccountLevelFrame {
+  cardComments: any;
+  cardUniqueId: string;
+  frameTotalOblForCardAmount: number;
+  frameLimitPotential: number;
+  isCardCalIssuer: boolean;
+  isAccountAssociate: boolean;
+  nextDebitDate: string;
+  nextTotalDebit: number;
+  bigNumber: BigNumber[];
+}
+
+export interface BigNumber {
+  cardUniqueID: string;
+  debitDate: string;
+  totalDebit: number;
+}
+
+export interface AccountExceptionalCard {
+  cardComments: CardComment[];
+  fictiveMaxCardAmt: any;
+  frameLimitForCardAmount: number;
+  cardUniqueId: string;
+  frameTotalOblForCardAmount: number;
+  frameLimitPotential: number;
+  isCardCalIssuer: boolean;
+  isAccountAssociate: boolean;
+  nextDebitDate: any;
+  nextTotalDebit: any;
+  bigNumber: any[];
+}
+
+export interface CardComment {
+  type: number;
+  key: number;
+  value: string;
+}
+
 
 function isPending(transaction: ScrapedTransaction | ScrapedPendingTransaction): transaction is ScrapedPendingTransaction {
   return (transaction as ScrapedTransaction).debCrdDate === undefined; // an arbitrary field that only appears in a completed transaction
@@ -420,6 +499,28 @@ class VisaCalScraper extends BaseScraperWithBrowser<ScraperSpecificCredentials> 
     };
   }
 
+  async getCardFrameStatus(creditCards: CardBlockType[]): Promise<FrameStatusResult> {
+    const Authorization = await this.getAuthorizationHeader();
+    const xSiteId = await this.getXSiteId();
+    const cardUniqueIds = creditCards.map(({ cardUniqueId }) => ({ cardUniqueId }));
+
+    const result = await fetchPostWithinPage<FrameStatusResult>(
+      this.page, CARD_FRAMEWORK_REQUEST_ENDPOINT,
+      { cardsForFrameData: cardUniqueIds },
+      {
+        Authorization,
+        'X-Site-Id': xSiteId,
+        'Content-Type': 'application/json',
+      },
+    );
+
+    if (!result) {
+      throw new Error('failed to fetch card frame status');
+    }
+
+    return result;
+  }
+
   async fetchData(): Promise<ScraperScrapingResult> {
     const defaultStartMoment = moment().subtract(1, 'years').subtract(6, 'months').add(1, 'day');
     const startDate = this.options.startDate || defaultStartMoment.toDate();
@@ -504,12 +605,17 @@ class VisaCalScraper extends BaseScraperWithBrowser<ScraperSpecificCredentials> 
       }),
     );
 
+    const cardsFrames = await this.getCardFrameStatus(creditCards);
+
     const accounts: TransactionsAccount[] = [{
       info: {
         accountName: user.custFullName,
       },
       pastOrFutureDebits,
       cardsPastOrFutureDebit: {
+        accountCreditFramework: cardsFrames.result.bankIssuedCards.frameLimitForCardAmount,
+        accountFrameworkNotUsed: cardsFrames.result.bankIssuedCards.fictiveMaxAccAmt,
+        accountFrameworkUsed: cardsFrames.result.bankIssuedCards.totalUsageAmountForAccountManagementLevel,
         cardsBlock: creditCards,
       },
     }];
