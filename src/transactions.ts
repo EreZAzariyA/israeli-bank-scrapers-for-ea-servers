@@ -133,6 +133,7 @@ export type CardBlockType = {
   cardFamilyDescription?: string;
   cardStatusCode?: number;
   cardValidityDate?: string;
+  cardImage?: string;
   dateOfUpcomingDebit?: string;
   NISTotalDebit?: number;
   USDTotalDebit?: number;

@@ -5,7 +5,7 @@ import { DOLLAR_CURRENCY, EURO_CURRENCY, SHEKEL_CURRENCY } from '../constants';
 import getAllMonthMoments from '../helpers/dates';
 import { getDebug } from '../helpers/debug';
 import { clickButton, elementPresentOnPage, waitUntilElementFound } from '../helpers/elements-interactions';
-import { fetchGetWithinPage } from '../helpers/fetch';
+import { fetchGetWithinPage, fetchPostWithinPage } from '../helpers/fetch';
 import { waitForRedirect } from '../helpers/navigation';
 import { filterOldTransactions, fixInstallments, sortTransactionsByDate } from '../helpers/transactions';
 import {
@@ -233,6 +233,80 @@ interface ScrapedTransactionsResult {
   };
 }
 
+
+export interface TransactionDetailsAction {
+  creditLimit?: number;
+  openToBuy?: number;
+  isDiscontCard?: boolean;
+  actionId: string;
+  actionLinkTitle: string;
+  actionTitle: string;
+  actionSubTitle: string;
+  actionText: string;
+  needToShowButton: boolean;
+  billingCycle?: number;
+  possibleBillingCycles?: number[];
+  hokItems?: HokItem[];
+}
+
+export interface HokItem {
+  merchantName: string;
+  amount: number;
+}
+
+interface ScrapedDetailsResult {
+  result: {
+    transactionDetailsActions: TransactionDetailsAction[];
+  };
+}
+
+export interface ScrapedHomeDataResult {
+  Result: HomeDataUserCardsResult;
+}
+
+export interface HomeDataUserCardsResult {
+  UserCards: UserCards;
+}
+
+export interface UserCards {
+  Summary: Summary[];
+  Cards: Card[];
+  IsMultUsers: boolean;
+  IsMultAccounts: boolean;
+}
+
+export interface Summary {
+  Currency: number;
+  ActualDebitSum: number;
+  TotalDebitSum: number;
+  CurrencySymbol: string;
+}
+
+export interface Card {
+  CatalogId: string;
+  Last4Digits: string;
+  ExpirationDate: string;
+  OwnerFullName: string;
+  CardName: string;
+  CardImage: string;
+  CreditLimit: number;
+  OpenToBuy: number;
+  FixedDebit: number;
+  CycleSummaryInfo: any;
+  ReturnCode: number;
+  CardLogo: number;
+  Index: number;
+  CreditLimitType: number;
+  IsActiveDigitalCard: boolean;
+  IsOwnerDigitalCard: boolean;
+  IsViewCardDetailsOK: boolean;
+  ShowMonthlyBillingLayout: boolean;
+  IsControlsBiZCardSubscribe: boolean;
+  ClearingAmtForOtb: any;
+  IsMyMAX: boolean;
+  MyMaxHebrewName: string;
+}
+
 async function fetchTransactionsForMonth(page: Page, monthMoment: Moment) {
   const url = getTransactionsUrl(monthMoment);
 
@@ -327,6 +401,39 @@ function createLoginFields(credentials: ScraperSpecificCredentials) {
 
 type ScraperSpecificCredentials = { username: string, password: string };
 
+function transactionDetailsActionsURL() {
+  return buildUrl(BASE_API_ACTIONS_URL, {
+    path: '/api/registered/GetTransactionDetailsActions',
+  });
+}
+function homePageDataURL() {
+  return buildUrl(BASE_API_ACTIONS_URL, {
+    path: '/api/registered/getHomePageData',
+  });
+}
+
+async function getHomeCreditCards(page: Page): Promise<Card[]> {
+  const url = homePageDataURL();
+
+  const data = await fetchGetWithinPage<ScrapedHomeDataResult>(page, url);
+  if (!data || !data.Result) {
+    throw new Error('Failed to fetch home page data');
+  }
+
+  return data.Result.UserCards.Cards;
+}
+
+async function getTransactionDetailsActions(page: Page): Promise<TransactionDetailsAction[]> {
+  const url = transactionDetailsActionsURL();
+
+  const data = await fetchPostWithinPage<ScrapedDetailsResult>(page, url, {});
+  if (!data || !data.result) {
+    throw new Error('Failed to fetch transaction details actions');
+  }
+
+  return data.result.transactionDetailsActions;
+}
+
 class MaxScraper extends BaseScraperWithBrowser<ScraperSpecificCredentials> {
   getLoginOptions(credentials: ScraperSpecificCredentials): LoginOptions {
     return {
@@ -354,8 +461,12 @@ class MaxScraper extends BaseScraperWithBrowser<ScraperSpecificCredentials> {
   async fetchData() {
     const results = await fetchTransactions(this.page, this.options);
     const allTransactions: Transaction[] = [];
+    const data = await getTransactionDetailsActions(this.page);
+    const cardsFrameworkObj = data.find((obj) => obj.actionTitle === 'מסגרת אשראי');
+    const cards = await getHomeCreditCards(this.page);
 
     const creditCards: CardBlockType[] = Object.entries(results).map(([cardNumber, transactions]) => {
+      const card = cards.find((c) => c.Last4Digits === cardNumber);
       const txns = transactions.map((t) => ({
         ...t,
         cardNumber,
@@ -365,6 +476,11 @@ class MaxScraper extends BaseScraperWithBrowser<ScraperSpecificCredentials> {
       });
       return {
         cardNumber,
+        cardFramework: card?.CreditLimit,
+        cardFrameworkUsed: card?.OpenToBuy,
+        cardImage: card?.CardImage,
+        cardName: card?.CardName,
+        cardUniqueId: card?.CatalogId,
         txns,
       };
     });
@@ -372,6 +488,8 @@ class MaxScraper extends BaseScraperWithBrowser<ScraperSpecificCredentials> {
     const accounts: TransactionsAccount[] = [{
       cardsPastOrFutureDebit: {
         cardsBlock: creditCards,
+        accountCreditFramework: cardsFrameworkObj?.creditLimit,
+        accountFrameworkNotUsed: cardsFrameworkObj?.openToBuy,
       },
     }];
 
