@@ -8,7 +8,10 @@ import { clickButton, elementPresentOnPage, waitUntilElementFound } from '../hel
 import { fetchGetWithinPage } from '../helpers/fetch';
 import { waitForRedirect } from '../helpers/navigation';
 import { filterOldTransactions, fixInstallments, sortTransactionsByDate } from '../helpers/transactions';
-import { TransactionStatuses, TransactionTypes, type Transaction } from '../transactions';
+import {
+  type CardBlockType,
+  TransactionStatuses, type TransactionsAccount, TransactionTypes, type Transaction,
+} from '../transactions';
 import {
   BaseScraperWithBrowser,
   LoginResults,
@@ -19,6 +22,7 @@ import { type ScraperOptions } from './interface';
 
 const debug = getDebug('max');
 
+// todo: Handle incorrect password - undefined error
 export interface ScrapedTransaction {
   shortCardNumber: string;
   paymentDate?: string;
@@ -199,7 +203,7 @@ function mapTransaction(rawTransaction: ScrapedTransaction): Transaction {
   const isPending = rawTransaction.paymentDate === null;
   const processedDate = moment(isPending ?
     rawTransaction.purchaseDate :
-    rawTransaction.paymentDate).toISOString();
+    rawTransaction.paymentDate ?? rawTransaction.purchaseDate).toISOString();
   const status = isPending ? TransactionStatuses.Pending : TransactionStatuses.Completed;
 
   const installments = getInstallmentsInfo(rawTransaction.comments);
@@ -349,12 +353,27 @@ class MaxScraper extends BaseScraperWithBrowser<ScraperSpecificCredentials> {
 
   async fetchData() {
     const results = await fetchTransactions(this.page, this.options);
-    const accounts = Object.keys(results).map((accountNumber) => {
+    const allTransactions: Transaction[] = [];
+
+    const creditCards: CardBlockType[] = Object.entries(results).map(([cardNumber, transactions]) => {
+      const txns = transactions.map((t) => ({
+        ...t,
+        cardNumber,
+      }));
+      txns.forEach((t) => {
+        allTransactions.push(t);
+      });
       return {
-        accountNumber,
-        txns: results[accountNumber],
+        cardNumber,
+        txns,
       };
     });
+
+    const accounts: TransactionsAccount[] = [{
+      cardsPastOrFutureDebit: {
+        cardsBlock: creditCards,
+      },
+    }];
 
     return {
       success: true,

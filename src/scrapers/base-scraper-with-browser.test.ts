@@ -44,6 +44,7 @@ describe('Base scraper with browser', () => {
       '--disable-gpu',
       '--window-size=1920x1080',
     ];
+    options.ignoreDefaultArgs = ['--disable-extensions'];
     baseScraperWithBrowser = new BaseScraperWithBrowser(options);
     try {
       await baseScraperWithBrowser.initialize();

@@ -271,7 +271,7 @@ async function getExtraScrapTransaction(page: Page, options:CompanyServiceOption
 }
 
 function getExtraScrapTransactions(accountWithIndex: TransactionsAccount & { index: number }, page: Page, options: CompanyServiceOptions, month: moment.Moment): Promise<Transaction[]> {
-  const promises = accountWithIndex.txns
+  const promises = accountWithIndex.txns || []
     .map((t) => getExtraScrapTransaction(page, options, month, accountWithIndex.index, t));
   return Promise.all(promises);
 }
@@ -283,7 +283,7 @@ async function getExtraScrapAccount(page: Page, options: CompanyServiceOptions, 
       txns: await getExtraScrapTransactions(accountMap[a], page, options, month),
     }));
   const accounts = await Promise.all(promises);
-  return accounts.reduce((m, x) => ({ ...m, [x.accountNumber]: x }), {});
+  return accounts.reduce((m, x) => ({ ...m, [JSON.stringify(x.accountNumber)]: x }), {});
 }
 
 function getExtraScrap(accountsWithIndex: ScrapedAccountsWithIndex[], page: Page, options: CompanyServiceOptions, allMonths: moment.Moment[]): Promise<ScrapedAccountsWithIndex[]> {
@@ -311,7 +311,9 @@ async function fetchAllTransactions(page: Page, options: ScraperOptions, company
         combinedTxns[accountNumber] = txnsForAccount;
       }
       const toBeAddedTxns = result[accountNumber].txns;
-      combinedTxns[accountNumber].push(...toBeAddedTxns);
+      if (toBeAddedTxns) {
+        combinedTxns[accountNumber].push(...toBeAddedTxns);
+      }
     });
   });
 

@@ -8,6 +8,17 @@ export enum ScraperErrorTypes {
   General = 'GENERAL_ERROR',
 }
 
+export enum ScraperErrorMessages {
+  FETCH_TNXS_ERROR = 'Failed to fetch account transactions.',
+  FETCH_ACCOUNT_INFO_ERROR = 'Failed to fetch account info.',
+  FETCH_ACCOUNT_EXTRA_INFO_ERROR = 'Failed to fetch account extra info.',
+  FETCH_DEBITS_ERROR = 'Failed to fetch past or future debits.',
+  FETCH_CARD_DEBITS_ERROR = 'Failed to fetch cards debits.',
+  FETCH_ACCOUNT_SAVES_ERROR = 'Failed to fetch account saves.',
+  FETCH_ACCOUNT_SECURITIES_ERROR = 'Failed to fetch account securities.',
+  FETCH_LOANS_ERROR = 'Failed to fetch account loans.',
+}
+
 export type ErrorResult = {
   success: false;
   errorType: ScraperErrorTypes;

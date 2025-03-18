@@ -32,9 +32,11 @@ export function getTestsConfig() {
 
   try {
     const configPath = path.join(__dirname, '.tests-config.js');
+    // eslint-disable-next-line import/no-dynamic-require, global-require
     testsConfig = require(configPath);
     return testsConfig;
   } catch (e) {
+    // eslint-disable-next-line no-console
     console.error(e);
     throw new Error(MISSING_ERROR_MESSAGE);
   }
@@ -66,6 +68,7 @@ export function exportTransactions(fileName: string, accounts: TransactionsAccou
 
   for (let i = 0; i < accounts.length; i += 1) {
     const account = accounts[i];
+    if (!account.txns) return;
 
     data = [
       ...data,

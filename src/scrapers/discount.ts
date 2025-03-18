@@ -5,74 +5,42 @@ import { waitUntilElementFound } from '../helpers/elements-interactions';
 import { fetchGetWithinPage } from '../helpers/fetch';
 import { waitForNavigation } from '../helpers/navigation';
 import {
-  type Transaction, TransactionStatuses, TransactionTypes,
+  convertCreditCardsDebits,
+  convertFutureDebits,
+  convertLoans,
+  convertTransactions,
+  DATE_FORMAT,
+} from '../utils';
+import type {
+  AccountInfoAndBalanceResultType,
+  AccountInfoType,
+  CardsPastOrFutureDebitResultType,
+  FutureDebitsResultType,
+  LoansResultType,
+  MainLoansType,
+  SavingResultType,
+  ScrapedAccountData,
+  ScrapedTransactionData,
+  TransactionsAccount,
 } from '../transactions';
-import { BaseScraperWithBrowser, LoginResults, type PossibleLoginResults } from './base-scraper-with-browser';
-import { ScraperErrorTypes } from './errors';
+import { TransactionStatuses } from '../transactions';
+import { ScraperErrorTypes, ScraperErrorMessages } from './errors';
 import { type ScraperOptions, type ScraperScrapingResult } from './interface';
+import { BaseScraperWithBrowser, LoginResults, type PossibleLoginResults } from './base-scraper-with-browser';
 
 const BASE_URL = 'https://start.telebank.co.il';
-const DATE_FORMAT = 'YYYYMMDD';
-
-interface ScrapedTransaction {
-  OperationNumber: number;
-  OperationDate: string;
-  ValueDate: string;
-  OperationAmount: number;
-  OperationDescriptionToDisplay: string;
-}
-
-interface CurrentAccountInfo {
-  AccountBalance: number;
-}
-
-interface ScrapedAccountData {
-  UserAccountsData: {
-    DefaultAccountNumber: string;
-  };
-}
-
-interface ScrapedTransactionData {
-  Error?: { MsgText: string };
-  CurrentAccountLastTransactions?: {
-    OperationEntry: ScrapedTransaction[];
-    CurrentAccountInfo: CurrentAccountInfo;
-    FutureTransactionsBlock:{
-      FutureTransactionEntry: ScrapedTransaction[];
-    };
-  };
-}
-
-function convertTransactions(txns: ScrapedTransaction[], txnStatus: TransactionStatuses): Transaction[] {
-  if (!txns) {
-    return [];
-  }
-  return txns.map((txn) => {
-    return {
-      type: TransactionTypes.Normal,
-      identifier: txn.OperationNumber,
-      date: moment(txn.OperationDate, DATE_FORMAT).toISOString(),
-      processedDate: moment(txn.ValueDate, DATE_FORMAT).toISOString(),
-      originalAmount: txn.OperationAmount,
-      originalCurrency: 'ILS',
-      chargedAmount: txn.OperationAmount,
-      description: txn.OperationDescriptionToDisplay,
-      status: txnStatus,
-    };
-  });
-}
 
 async function fetchAccountData(page: Page, options: ScraperOptions): Promise<ScraperScrapingResult> {
   const apiSiteUrl = `${BASE_URL}/Titan/gatewayAPI`;
-
   const accountDataUrl = `${apiSiteUrl}/userAccountsData`;
-  const accountInfo = await fetchGetWithinPage<ScrapedAccountData>(page, accountDataUrl);
+  const errors = [];
 
+  const accountInfo = await fetchGetWithinPage<ScrapedAccountData>(page, accountDataUrl);
   if (!accountInfo) {
     return {
       success: false,
       errorType: ScraperErrorTypes.Generic,
-      errorMessage: 'failed to get account data',
+      errorMessage: ScraperErrorMessages.FETCH_ACCOUNT_INFO_ERROR,
     };
   }
   const accountNumber = accountInfo.UserAccountsData.DefaultAccountNumber;
@@ -80,36 +48,108 @@ async function fetchAccountData(page: Page, options: ScraperOptions): Promise<Sc
   const defaultStartMoment = moment().subtract(1, 'years').add(2, 'day');
   const startDate = options.startDate || defaultStartMoment.toDate();
   const startMoment = moment.max(defaultStartMoment, moment(startDate));
-
   const startDateStr = startMoment.format(DATE_FORMAT);
+
   const txnsUrl = `${apiSiteUrl}/lastTransactions/${accountNumber}/Date?IsCategoryDescCode=True&IsTransactionDetails=True&IsEventNames=True&IsFutureTransactionFlag=True&FromDate=${startDateStr}`;
   const txnsResult = await fetchGetWithinPage<ScrapedTransactionData>(page, txnsUrl);
-  if (!txnsResult || txnsResult.Error ||
-    !txnsResult.CurrentAccountLastTransactions) {
+  if (!txnsResult || txnsResult.Error || !txnsResult.CurrentAccountLastTransactions) {
     return {
       success: false,
       errorType: ScraperErrorTypes.Generic,
-      errorMessage: txnsResult && txnsResult.Error ? txnsResult.Error.MsgText : 'unknown error',
+      errorMessage: ScraperErrorMessages.FETCH_TNXS_ERROR,
     };
   }
-
+  const balance = txnsResult.CurrentAccountLastTransactions.CurrentAccountInfo.AccountBalance;
+  const rawFutureTxns = _.get(txnsResult, 'CurrentAccountLastTransactions.FutureTransactionsBlock.FutureTransactionEntry');
   const completedTxns = convertTransactions(
     txnsResult.CurrentAccountLastTransactions.OperationEntry,
     TransactionStatuses.Completed,
   );
-  const rawFutureTxns = _.get(txnsResult, 'CurrentAccountLastTransactions.FutureTransactionsBlock.FutureTransactionEntry') as ScrapedTransaction[];
-  const pendingTxns = convertTransactions(rawFutureTxns, TransactionStatuses.Pending);
+  const pendingTxns = convertTransactions(rawFutureTxns || [], TransactionStatuses.Pending);
+  const transactions = [...completedTxns, ...pendingTxns];
 
-  const accountData = {
-    success: true,
-    accounts: [{
-      accountNumber,
-      balance: txnsResult.CurrentAccountLastTransactions.CurrentAccountInfo.AccountBalance,
-      txns: [...completedTxns, ...pendingTxns],
-    }],
+  const infoAndBalanceUrl = `${apiSiteUrl}/accountDetails/infoAndBalance`;
+  const extraInfoUrl = `${infoAndBalanceUrl}/${accountNumber}`;
+  const extraInfoResult = await fetchGetWithinPage<AccountInfoAndBalanceResultType>(page, extraInfoUrl);
+  if (!extraInfoResult || extraInfoResult.Error) {
+    return {
+      success: false,
+      errorType: ScraperErrorTypes.Generic,
+      errorMessage: ScraperErrorMessages.FETCH_ACCOUNT_EXTRA_INFO_ERROR,
+    };
+  }
+  const extraInfo: AccountInfoType = {
+    accountAvailableBalance: extraInfoResult.AccountInfoAndBalance.AccountAvailableBalance,
+    accountBalance: extraInfoResult.AccountInfoAndBalance.AccountBalance,
+    accountCurrencyCode: extraInfoResult.AccountInfoAndBalance.AccountCurrencyCode,
+    accountCurrencyLongName: extraInfoResult.AccountInfoAndBalance.AccountCurrencyLongName,
+    accountName: extraInfoResult.AccountInfoAndBalance.AccountName,
+    accountStatusCode: extraInfoResult.AccountInfoAndBalance.AccountStatusCode,
+    handlingBranchID: extraInfoResult.AccountInfoAndBalance.HandlingBranchID,
+    handlingBranchName: extraInfoResult.AccountInfoAndBalance.HandlingBranchName,
+    privateBusinessFlag: extraInfoResult.AccountInfoAndBalance.PrivateBusinessFlag,
   };
 
-  return accountData;
+  const { AccountStatusCode, PrivateBusinessFlag } = extraInfoResult.AccountInfoAndBalance;
+  const pastOrFutureDebitsUrl = `${apiSiteUrl}/creditCards/pastOrFutureDebits/${accountNumber}/${AccountStatusCode}/${PrivateBusinessFlag}`;
+  const pastOrFutureDebitsResult = await fetchGetWithinPage<FutureDebitsResultType>(page, pastOrFutureDebitsUrl);
+  if (!pastOrFutureDebitsResult || pastOrFutureDebitsResult.Error) {
+    return {
+      success: false,
+      errorType: ScraperErrorTypes.Generic,
+      errorMessage: ScraperErrorMessages.FETCH_DEBITS_ERROR,
+    };
+  }
+  const pastOrFutureDebits = convertFutureDebits(pastOrFutureDebitsResult);
+
+  const cardsDebitsUrl = `${apiSiteUrl}/creditCards/cardsPastOrFutureDebitTotal`;
+  const cardsDebitsFullUrl = `${cardsDebitsUrl}/${accountNumber}/F`;
+  const cardsDebitsResult = await fetchGetWithinPage<CardsPastOrFutureDebitResultType>(page, cardsDebitsFullUrl);
+  if (!cardsDebitsResult || cardsDebitsResult.Error) {
+    return {
+      success: false,
+      errorType: ScraperErrorTypes.Generic,
+      errorMessage: ScraperErrorMessages.FETCH_CARD_DEBITS_ERROR,
+    };
+  }
+  const cardsPastOrFutureDebit = convertCreditCardsDebits(cardsDebitsResult);
+
+  const savingUrl = `${apiSiteUrl}/deposits/depositsDetails`;
+  const savingFullUrl = `${savingUrl}/${accountNumber}/1`;
+  const savingResult = await fetchGetWithinPage<SavingResultType>(page, savingFullUrl);
+  if (!savingResult || savingResult.Error) {
+    errors.push(ScraperErrorMessages.FETCH_ACCOUNT_SAVES_ERROR);
+  }
+
+  const loansUrl = `${apiSiteUrl}/onlineLoans/loansQuery/${accountNumber}`;
+  const loansResult = await fetchGetWithinPage<LoansResultType>(page, loansUrl);
+
+  let loans: MainLoansType | undefined;
+  if (!loansResult || loansResult.Error) {
+    errors.push(ScraperErrorMessages.FETCH_LOANS_ERROR);
+  } else {
+    loans = convertLoans(loansResult);
+  }
+
+  const account: TransactionsAccount = {
+    accountNumber,
+    balance,
+    txns: transactions,
+    info: extraInfo,
+    pastOrFutureDebits,
+    cardsPastOrFutureDebit,
+    saving: {
+      businessDate: savingResult?.DepositsDetails?.BusinessDate,
+      currencyCode: savingResult?.DepositsDetails?.CurrencyCode,
+      totalDepositsCurrentValue: savingResult?.DepositsDetails?.TotalDepositsCurrentValue,
+    },
+    loans,
+  };
+
+  return {
+    success: true,
+    accounts: [account],
+  };
 }
 
 async function navigateOrErrorLabel(page: Page) {
