@@ -474,12 +474,12 @@ class MaxScraper extends BaseScraperWithBrowser<ScraperSpecificCredentials> {
       txns.forEach((t) => {
         allTransactions.push(t);
       });
-      const cardFrameworkNotUsed = ((card?.CreditLimit || 0) - (card?.OpenToBuy || 0)) || 0;
+      const cardFrameworkUsed = ((card?.CreditLimit || 0) - (card?.OpenToBuy || 0)) || 0;
       return {
         cardNumber,
         cardFramework: card?.CreditLimit,
-        cardFrameworkUsed: card?.OpenToBuy,
-        cardFrameworkNotUsed,
+        cardFrameworkUsed,
+        cardFrameworkNotUsed: card?.OpenToBuy,
         cardImage: card?.CardImage,
         cardName: card?.CardName,
         cardUniqueId: card?.CatalogId,
