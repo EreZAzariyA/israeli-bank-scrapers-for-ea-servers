@@ -1,12 +1,12 @@
 {
   "name": "israeli-bank-scrapers-by-e.a",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Provide scrapers for all major Israeli banks and credit card companies",
   "engines": {
     "node": ">= 18.19.0"
   },
   "main": "lib/index.js",
-  "types": "lib/index.d.ts",
+  "types": "types/index.d.ts",
   "scripts": {
     "clean": "rimraf lib",
     "test": "cross-env BABEL_ENV=test jest",

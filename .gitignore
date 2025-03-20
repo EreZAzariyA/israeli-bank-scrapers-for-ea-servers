@@ -59,6 +59,7 @@ typings/
 
 # NPM package related
 lib/
+types/
 
 # IDEs
 .idea
