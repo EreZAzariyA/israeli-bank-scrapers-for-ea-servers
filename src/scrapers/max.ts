@@ -233,6 +233,11 @@ interface ScrapedTransactionsResult {
   };
 }
 
+const ActionsTitle = {
+  CreditLine: 'מסגרת אשראי',
+  DebitDate: 'תאריך חיוב אשראי',
+  HOC: 'הוראות קבע',
+};
 
 export interface TransactionDetailsAction {
   creditLimit?: number;
@@ -462,7 +467,7 @@ class MaxScraper extends BaseScraperWithBrowser<ScraperSpecificCredentials> {
     const results = await fetchTransactions(this.page, this.options);
     const allTransactions: Transaction[] = [];
     const data = await getTransactionDetailsActions(this.page);
-    const cardsFrameworkObj = data.find((obj) => obj.actionTitle === 'מסגרת אשראי');
+    const cardsFrameworkObj = data.find((obj) => obj.actionTitle === ActionsTitle.CreditLine);
     const cards = await getHomeCreditCards(this.page);
 
     const creditCards: CardBlockType[] = Object.entries(results).map(([cardNumber, transactions]) => {
