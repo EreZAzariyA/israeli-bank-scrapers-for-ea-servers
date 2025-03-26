@@ -52,7 +52,7 @@ describe('Mizrahi scraper', () => {
     expect((result.accounts as any).length).toBeGreaterThan(0);
     const account: TransactionsAccount = (result as any).accounts[0];
     expect(account.accountNumber).not.toBe('');
-    expect(account.txns[0].date).toMatch(ISO_DATE_REGEX);
+    expect(account.txns?.[0].date).toMatch(ISO_DATE_REGEX);
 
     exportTransactions(COMPANY_ID, result.accounts || []);
   });

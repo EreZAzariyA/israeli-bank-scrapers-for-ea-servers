@@ -10,10 +10,12 @@ import { getFromSessionStorage } from '../helpers/storage';
 import { filterOldTransactions } from '../helpers/transactions';
 import { waitUntil } from '../helpers/waiting';
 import {
-  TransactionStatuses,
-  TransactionTypes,
+  type CardBlockType,
+  type PastOrFutureDebitType,
   type Transaction,
   type TransactionsAccount,
+  TransactionStatuses,
+  TransactionTypes,
 } from '../transactions';
 import { BaseScraperWithBrowser, LoginResults, type LoginOptions } from './base-scraper-with-browser';
 import { type ScraperScrapingResult } from './interface';
@@ -96,14 +98,40 @@ interface ScrapedPendingTransaction {
   transTypeCommentDetails: [];
 
 }
-interface InitResponse {
-  result: {
-    cards: {
-      cardUniqueId: string;
-      last4Digits: string;
-      [key: string]: unknown;
-    }[];
+
+type ResultType = {
+  user: {
+    firstName: string;
+    lastName: string;
+    custFullName: string;
+    custExtId: number;
+    custExtTypeCode: number;
+    custIntrId: number;
   };
+  cards: [{
+    cardUniqueId: string;
+    last4Digits: string;
+    cardOwnerFirstName: string;
+    cardOwnerLastName: string;
+    cardDescription: string;
+    cardType: string;
+    cardOwnerCustExtId: string;
+    companyDescription: string;
+  }];
+  bankAccounts: [{
+    bankAccountUniqueId: number;
+    bankBranchNum: number;
+    bankAccountNum: number;
+    bankName: string;
+    originalBankCode: number;
+    isDefault: boolean;
+    accountPartnerName: string;
+    lastDpDate: string;
+  }];
+};
+
+interface InitResponse {
+  result: ResultType;
 }
 type CurrencySymbol = string;
 interface CardTransactionDetailsError {
@@ -231,6 +259,19 @@ function createLoginFields(credentials: ScraperSpecificCredentials) {
   ];
 }
 
+const getCardDebits = (monthData: CardTransactionDetails): PastOrFutureDebitType => {
+  const { debitDates = [] } = monthData.result.bankAccounts[0];
+  const { date, totalDebits: [{ amount }], transactions } = debitDates[0];
+
+  return {
+    debitMonth: date,
+    monthlyNumberOfTransactions: transactions.length,
+    monthlyNISDebitSum: amount,
+    monthlyEURDebitSum: 0,
+    monthlyUSDDebitSum: 0,
+  };
+};
+
 function convertParsedDataToTransactions(data: CardTransactionDetails[], pendingData?: CardPendingTransactionDetails | null): Transaction[] {
   const pendingTransactions = pendingData?.result ?
     pendingData.result.cardsList.flatMap((card) => card.authDetalisList) :
@@ -313,7 +354,7 @@ class VisaCalScraper extends BaseScraperWithBrowser<ScraperSpecificCredentials> 
     return frame;
   };
 
-  async getCards() {
+  async getResult(): Promise<ResultType> {
     const initData = await waitUntil(
       () => getFromSessionStorage<InitResponse>(this.page, 'init'),
       'get init data in session storage',
@@ -323,7 +364,7 @@ class VisaCalScraper extends BaseScraperWithBrowser<ScraperSpecificCredentials> 
     if (!initData) {
       throw new Error('could not find \'init\' data in session storage');
     }
-    return initData?.result.cards.map(({ cardUniqueId, last4Digits }) => ({ cardUniqueId, last4Digits }));
+    return initData?.result;
   }
 
   async getAuthorizationHeader() {
@@ -386,16 +427,20 @@ class VisaCalScraper extends BaseScraperWithBrowser<ScraperSpecificCredentials> 
     debug(`fetch transactions starting ${startMoment.format()}`);
 
     const Authorization = await this.getAuthorizationHeader();
-    const cards = await this.getCards();
+    const result = await this.getResult();
+    const { user, cards } = result;
+
     const xSiteId = await this.getXSiteId();
     const futureMonthsToScrape = this.options.futureMonthsToScrape ?? 1;
 
-    const accounts = await Promise.all(
+    const allMonthsData: (CardTransactionDetails)[] = [];
+    const pastOrFutureDebits: PastOrFutureDebitType[] = [];
+
+    const creditCards: CardBlockType[] = await Promise.all(
       cards.map(async (card) => {
         const finalMonthToFetchMoment = moment().add(futureMonthsToScrape, 'month');
         const months = finalMonthToFetchMoment.diff(startMoment, 'months');
 
-        const allMonthsData: (CardTransactionDetails)[] = [];
 
         debug(`fetch pending transactions for card ${card.cardUniqueId}`);
         let pendingData = await fetchPostWithinPage<CardPendingTransactionDetails | CardTransactionDetailsError>(
@@ -426,7 +471,8 @@ class VisaCalScraper extends BaseScraperWithBrowser<ScraperSpecificCredentials> 
           if (!isCardTransactionDetails(monthData)) {
             throw new Error('monthData is not of type CardTransactionDetails');
           }
-
+          const debits = getCardDebits(monthData);
+          pastOrFutureDebits.push(debits);
           allMonthsData.push(monthData);
         }
 
@@ -438,7 +484,10 @@ class VisaCalScraper extends BaseScraperWithBrowser<ScraperSpecificCredentials> 
           pendingData = null;
         }
 
-        const transactions = convertParsedDataToTransactions(allMonthsData, pendingData);
+        const transactions = convertParsedDataToTransactions(allMonthsData, pendingData).map((t) => ({
+          ...t,
+          cardNumber: card.last4Digits,
+        }));
 
         debug('filer out old transactions');
         const txns = (this.options.outputData?.enableTransactionsFilterByDate ?? true) ?
@@ -446,14 +495,26 @@ class VisaCalScraper extends BaseScraperWithBrowser<ScraperSpecificCredentials> 
           transactions;
 
         return {
+          firstName: card.cardOwnerFirstName,
+          cardNumber: card.last4Digits,
+          cardFamilyDescription: card.companyDescription,
+          cardUniqueId: card.cardUniqueId,
           txns,
-          accountNumber: card.last4Digits,
-        } as TransactionsAccount;
+        };
       }),
     );
 
-    debug('return the scraped accounts');
+    const accounts: TransactionsAccount[] = [{
+      info: {
+        accountName: user.custFullName,
+      },
+      pastOrFutureDebits,
+      cardsPastOrFutureDebit: {
+        cardsBlock: creditCards,
+      },
+    }];
 
+    debug('return the scraped accounts');
     debug(JSON.stringify(accounts, null, 2));
     return {
       success: true,

@@ -155,6 +155,7 @@ export interface ScraperScrapingResult {
   futureDebits?: FutureDebit[];
   errorType?: ScraperErrorTypes;
   errorMessage?: string; // only on success=false
+  errors?: string[];
 }
 
 export interface Scraper<TCredentials extends ScraperCredentials> {
