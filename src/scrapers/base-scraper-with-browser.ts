@@ -84,6 +84,8 @@ function createGeneralError(): ScraperScrapingResult {
 class BaseScraperWithBrowser<TCredentials extends ScraperCredentials> extends BaseScraper<TCredentials> {
   private cleanups: Array<() => Promise<void>> = [];
 
+  public customExecutablePath!: string;
+
   // NOTICE - it is discouraged to use bang (!) in general. It is used here because
   // all the classes that inherit from this base assume is it mandatory.
   protected page!: Page;
@@ -94,6 +96,7 @@ class BaseScraperWithBrowser<TCredentials extends ScraperCredentials> extends Ba
       height: VIEWPORT_HEIGHT,
     };
   }
+  
 
   async initialize() {
     await super.initialize();
@@ -133,6 +136,13 @@ class BaseScraperWithBrowser<TCredentials extends ScraperCredentials> extends Ba
     });
   }
 
+  getPlatform() {
+    console.log(process.platform);
+    if (process.platform === 'linux') {
+      this.customExecutablePath = '/snap/bin/chromium';
+    }
+  }
+
   private async initializePage() {
     debug('initialize browser page');
     if ('browserContext' in this.options) {
@@ -156,6 +166,7 @@ class BaseScraperWithBrowser<TCredentials extends ScraperCredentials> extends Ba
 
       return browser.newPage();
     }
+    this.getPlatform();
 
     const { timeout, args, executablePath, showBrowser } = this.options;
 
@@ -165,7 +176,7 @@ class BaseScraperWithBrowser<TCredentials extends ScraperCredentials> extends Ba
     const browser = await puppeteer.launch({
       env: this.options.verbose ? { DEBUG: '*', ...process.env } : undefined,
       headless,
-      executablePath,
+      executablePath: this.customExecutablePath ?? executablePath,
       args,
       timeout,
     });
